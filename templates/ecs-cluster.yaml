@@ -1,0 +1,100 @@
+Description: >
+  Create ECS Cluster resources for Blue/Green Deployment on ECS. For further reference, please review BluegreenRepo ==> https://github.com/awslabs/ecs-blue-green-deployment
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t2.large
+
+  ClusterSize:
+    Type: Number
+    Default: 1
+
+  Subnet1:
+    Type: AWS::EC2::Subnet::Id
+  Subnet2:
+    Type: AWS::EC2::Subnet::Id
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+
+  VpcCIDR:
+    Type: String
+
+  Code1:
+    Type: String
+    Default: latest
+
+  Code2:
+    Type: String
+    Default: latest
+
+  Repository:
+    Type: String
+
+  GitHubRepo:
+    Type: String
+
+  TemplateBucket:
+    Type: String
+    Description: >
+      S3 Bucket used for nested templates
+
+Resources:
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref AWS::StackName
+
+  LoadBalancer:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://s3.amazonaws.com/${TemplateBucket}/templates/load-balancer.yaml
+      Parameters:
+        Subnet1: !Ref Subnet1
+        Subnet2: !Ref Subnet2
+        VpcId: !Ref VpcId
+        VpcCIDR: !Ref VpcCIDR
+        Name: !Ref GitHubRepo
+
+  GreenService:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://s3.amazonaws.com/${TemplateBucket}/templates/service.yaml
+      Parameters:
+        Cluster: !Ref Cluster
+        LoadBalancer: !GetAtt LoadBalancer.Outputs.LoadBalancerArn
+        Port: 8080
+        Tag: !Ref Code2
+        DesiredCount: '1'
+        VpcId: !Ref VpcId
+        Repository: !Ref Repository
+        Identifier: 'Code2'
+        IsProduction: False
+        Subnet1: !Ref Subnet1
+        Subnet2: !Ref Subnet2
+        ALBSg: !GetAtt LoadBalancer.Outputs.SecurityGroup
+        TemplateBucket: !Ref TemplateBucket
+
+  BlueService:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://s3.amazonaws.com/${TemplateBucket}/templates/service.yaml
+      Parameters:
+        Cluster: !Ref Cluster
+        LoadBalancer: !GetAtt LoadBalancer.Outputs.LoadBalancerArn
+        Port: 80
+        Tag: !Ref Code1
+        DesiredCount: '1'
+        VpcId: !Ref VpcId
+        Repository: !Ref Repository
+        Identifier: 'Code1'
+        IsProduction: True
+        Subnet1: !Ref Subnet1
+        Subnet2: !Ref Subnet2
+        ALBSg: !GetAtt LoadBalancer.Outputs.SecurityGroup
+        TemplateBucket: !Ref TemplateBucket
+
+Outputs:
+  ClusterName:
+    Value: !Ref Cluster

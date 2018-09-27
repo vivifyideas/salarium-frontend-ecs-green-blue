@@ -1,0 +1,107 @@
+Description: >
+  Create Cloudwatch alarm that triggers ScaleUp and ScaleDown scaling policies, to allow Autoscaling of ecs service.
+
+Parameters:
+  Cluster:
+    Type: String
+
+  Service:
+    Type: String
+
+  ServiceName:
+    Type: String
+
+Resources:
+  ServiceAutoScalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          Action:
+            - 'sts:AssumeRole'
+          Effect: Allow
+          Principal:
+            Service:
+              - application-autoscaling.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: ecs-service-autoscaling
+          PolicyDocument:
+            Statement:
+              Effect: Allow
+              Action:
+                - application-autoscaling:*
+                - cloudwatch:DescribeAlarms
+                - cloudwatch:PutMetricAlarm
+                - cloudwatch:DeleteAlarms
+                - iam:CreateServiceLinkedRole
+                - ecs:DescribeServices
+                - ecs:UpdateService
+              Resource: '*'
+
+  ServiceScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 5
+      MinCapacity: 1
+      ResourceId: !Join ['/', [service, !Ref 'Cluster', !Ref 'ServiceName']]
+      RoleARN: !GetAtt [ServiceAutoScalingRole, Arn]
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  ScaleUp:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: ServicePolicyUp
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref 'ServiceScalableTarget'
+      StepScalingPolicyConfiguration:
+        Cooldown: 60
+        MetricAggregationType: 'Average'
+        AdjustmentType: 'ChangeInCapacity'
+        StepAdjustments:
+          - MetricIntervalLowerBound: 0
+            MetricIntervalUpperBound: 10
+            ScalingAdjustment: 1
+          - MetricIntervalLowerBound: 10
+            ScalingAdjustment: 1
+
+  ScaleDown:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: ServicePolicyDown
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref 'ServiceScalableTarget'
+      StepScalingPolicyConfiguration:
+        Cooldown: 60
+        MetricAggregationType: 'Average'
+        AdjustmentType: 'ChangeInCapacity'
+        StepAdjustments:
+          - MetricIntervalUpperBound: -1
+            MetricIntervalLowerBound: -10
+            ScalingAdjustment: -1
+          - MetricIntervalUpperBound: -10
+            ScalingAdjustment: -1
+
+  SeviceCPUAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmName: 'SeviceCPUAlarm'
+      AlarmDescription: 'Trigger scaling based on CPU Utilization.'
+      Namespace: 'AWS/ECS'
+      MetricName: 'CPUUtilization'
+      ComparisonOperator: 'GreaterThanThreshold'
+      Dimensions:
+        - Name: Service
+          Value: !Ref 'Service'
+      EvaluationPeriods: 2
+      Period: 300
+      Statistic: 'Average'
+      Threshold: 90
+      AlarmActions:
+        - !Ref 'ScaleUp'
+        - !Ref 'ScaleDown'
+      OKActions:
+        - !Ref 'ScaleUp'
+        - !Ref 'ScaleDown'
