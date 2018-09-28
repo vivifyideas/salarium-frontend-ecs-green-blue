@@ -226,6 +226,8 @@ Resources:
             build:
               commands:
                 - docker build --tag "$(cat /tmp/build_tag.out)" .
+                - docker build --tag unit-test:latest -f Dockerfile-unit .
+                - docker run --rm unit-test:latest yarn test:unit
             post_build:
               commands:
                 - ok && docker push "$(cat /tmp/build_tag.out)"
